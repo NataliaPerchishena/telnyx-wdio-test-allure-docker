@@ -63,15 +63,17 @@ jobs:
         env:
           CI: "true"
 
-      # ---------- ІСТОРІЯ ALLURE (кешуємо по гілці + середовищу) ----------
+        # ---------- ІСТОРІЯ ALLURE (кешуємо по гілці + середовищу) ----------
       - name: Restore history cache
         if: always()
         id: cache-restore
         uses: actions/cache/restore@v4
         with:
           path: .allure-history
-          key: allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}
+          # унікальний ключ на кожен ран => відновлюємо останній за префіксом
+          key: allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}-${{ github.run_id }}
           restore-keys: |
+            allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}-
             allure-history-${{ github.ref_name }}-
             allure-history-
 
@@ -91,7 +93,7 @@ jobs:
           touch allure-report/.nojekyll
           ls -lah allure-report || true
 
-      # Оновлюємо кеш історії на наступний прогін
+      # ---------- ПІСЛЯ генерації оновлюємо кеш на майбутнє ----------
       - name: Update history cache folder
         if: always()
         run: |
@@ -100,6 +102,14 @@ jobs:
           if [ -d "allure-report/history" ]; then
             cp -R allure-report/history/* .allure-history/ || true
           fi
+
+      - name: Save history cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .allure-history
+          # записуємо під новим ключем (цей ран)
+          key: allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}-${{ github.run_id }}
 
       # Артефакт для Pages (офіційний)
       - name: Upload Pages artifact
