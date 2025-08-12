@@ -1,8 +1,8 @@
-name: CI • WDIO + Allure + Pages
+name: CI • WDIO + Allure (Official Pages w/ history per env)
 
 on:
   push:
-    branches: ["master"]
+    branches: ["master"] # або main, якщо потрібно
   pull_request:
   workflow_dispatch:
     inputs:
@@ -12,7 +12,7 @@ on:
         default: prod
         options: [dev, staging, prod]
       browsers:
-        description: "Which browser(s) to run"
+        description: "Which browsers to run"
         type: choice
         default: both
         options: [chrome, firefox, both]
@@ -20,13 +20,9 @@ on:
         description: "Optional: run single spec (e.g. test/specs/smoke.status.e2e.ts)"
         type: string
         required: false
-      deploy:
-        description: "Deploy Allure report to gh-pages?"
-        type: boolean
-        default: true
 
 permissions:
-  contents: write
+  contents: read # для checkout; права на Pages будуть в deploy job
 
 jobs:
   e2e:
@@ -39,12 +35,14 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
+      - name: Install deps
         run: npm ci
 
-      - name: Build spec arg
-        id: specarg
+      # Встановлюємо дефолти для run, якщо ручного запуску не було
+      - name: Resolve inputs defaults
         run: |
+          echo "RUN_ENV=${{ inputs.environment || 'prod' }}" >> $GITHUB_ENV
+          echo "RUN_BROWSERS=${{ inputs.browsers || 'both' }}" >> $GITHUB_ENV
           if [ -n "${{ inputs.spec_path }}" ]; then
             echo "SPEC_ARG=-- --spec ${{ inputs.spec_path }}" >> $GITHUB_ENV
           else
@@ -52,52 +50,83 @@ jobs:
           fi
 
       # Chrome
-      - name: Run Chrome tests (${{ inputs.environment || 'prod' }})
-        if: ${{ inputs.browsers == 'chrome' || inputs.browsers == 'both' || (github.event_name != 'workflow_dispatch') }}
-        run: npm run test:${{ inputs.environment || 'prod' }}:chrome $SPEC_ARG
+      - name: Run Chrome tests (${{ env.RUN_ENV }})
+        if: ${{ env.RUN_BROWSERS == 'chrome' || env.RUN_BROWSERS == 'both' || github.event_name != 'workflow_dispatch' }}
+        run: npm run test:${RUN_ENV}:chrome $SPEC_ARG
         env:
           CI: "true"
 
       # Firefox
-      - name: Run Firefox tests (${{ inputs.environment || 'prod' }})
-        if: ${{ inputs.browsers == 'firefox' || inputs.browsers == 'both' || (github.event_name != 'workflow_dispatch') }}
-        run: npm run test:${{ inputs.environment || 'prod' }}:firefox $SPEC_ARG
+      - name: Run Firefox tests (${{ env.RUN_ENV }})
+        if: ${{ env.RUN_BROWSERS == 'firefox' || env.RUN_BROWSERS == 'both' || github.event_name != 'workflow_dispatch' }}
+        run: npm run test:${RUN_ENV}:firefox $SPEC_ARG
         env:
           CI: "true"
 
-      # Генеруємо звіт навіть якщо тести впали
+      # ---------- ІСТОРІЯ ALLURE (кешуємо по гілці + середовищу) ----------
+      - name: Restore history cache
+        if: always()
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .allure-history
+          key: allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}
+          restore-keys: |
+            allure-history-${{ github.ref_name }}-
+            allure-history-
+
+      - name: Bring history into allure-results
+        if: always()
+        run: |
+          if [ -d ".allure-history" ]; then
+            mkdir -p allure-results/history
+            cp -R .allure-history/* allure-results/history/ || true
+          fi
+
+      # ---------- ГЕНЕРАЦІЯ ЗВІТУ ----------
       - name: Generate Allure report (always)
         if: always()
         run: |
           npm run report:allure:generate || true
-          ls -lah || true
-          ls -lah allure-results || true
+          touch allure-report/.nojekyll
           ls -lah allure-report || true
 
-          # якщо раптом Allure не створив index.html — зробимо плейсхолдер, щоб не було 404
-          if [ ! -f allure-report/index.html ]; then
-            echo "No Allure results were produced. Creating placeholder index.html"
-            mkdir -p allure-report
-            printf '<!doctype html><meta charset="utf-8"><title>No report</title><h1>No Allure results were produced for this run.</h1>' > allure-report/index.html
-          fi
-          # відключаємо Jekyll, щоб не ламав структуру
-          touch allure-report/.nojekyll
-
-      - name: Upload Allure artifact
+      # Оновлюємо кеш історії на наступний прогін
+      - name: Update history cache folder
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: allure-report
-          path: allure-report
+        run: |
+          rm -rf .allure-history
+          mkdir -p .allure-history
+          if [ -d "allure-report/history" ]; then
+            cp -R allure-report/history/* .allure-history/ || true
+          fi
 
-      - name: Deploy Allure to gh-pages
-        if: >
-          always() && (
-            (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
-            (github.event_name == 'workflow_dispatch' && inputs.deploy == 'true')
-          )
-        uses: JamesIves/github-pages-deploy-action@v4
+      # Артефакт для Pages (офіційний)
+      - name: Upload Pages artifact
+        if: always()
+        uses: actions/upload-pages-artifact@v3
         with:
-          branch: gh-pages
-          folder: allure-report
-          clean: true
+          path: ./allure-report
+
+      # Зберігаємо кеш з оновленою історією
+      - name: Save history cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .allure-history
+          key: allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}
+
+  deploy:
+    needs: e2e
+    if: always()
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages (official)
+        id: deployment
+        uses: actions/deploy-pages@v4
