@@ -1,0 +1,55 @@
+name: CI • WDIO + Allure + Pages
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+# потрібно для пушу у gh-pages
+permissions:
+  contents: write
+
+jobs:
+  e2e:
+    name: Run tests and publish Allure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Chrome (prod env)
+      - name: Run Chrome tests
+        run: npm run test:prod:chrome
+        env:
+          CI: "true"
+
+      # Firefox (prod env)
+      - name: Run Firefox tests
+        run: npm run test:prod:firefox
+        env:
+          CI: "true"
+
+      - name: Generate Allure report
+        run: npm run report:allure:generate
+
+      - name: Upload Allure artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report
+
+      - name: Deploy Allure to gh-pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: allure-report
