@@ -1,52 +1,37 @@
 import dotenv from 'dotenv'
+import fs from 'node:fs'         
+import path from 'node:path'      
 
-// 1) Підхопити змінні середовища з .env (дозволяємо вибрати файл через ENV_FILE)
 dotenv.config({ path: process.env.ENV_FILE || '.env' })
 
-// 2) Базовий конфіг WDIO — тільки те, що реально потрібно
 export const config: WebdriverIO.Config = {
-  // Локальний раннер (звичайний режим без Selenium Grid/Cloud)
   runner: 'local',
-
-  // Де шукати тести
   specs: ['./test/specs/**/*.e2e.ts'],
-
-  // Скільки воркерів піднімати паралельно
   maxInstances: 2,
-
-  // Рівень логів (info достатньо)
   logLevel: 'info',
-
-  // Базова адреса (з .env, з дефолтом на всяк випадок)
   baseUrl: process.env.BASE_URL || 'https://telnyx.com',
-
-  // Таймаут для команд типу waitFor*
   waitforTimeout: 10000,
 
-  // Тестовий фреймворк
   framework: 'mocha',
+  mochaOpts: { ui: 'bdd', timeout: 60000 },
 
-  // Налаштування Mocha — тільки інтерфейс і таймаут
-  mochaOpts: {
-    ui: 'bdd',
-    timeout: 60000
-  },
-
-  // Репортери: консольний і Allure (скидаємо результати у allure-results)
   reporters: [
     'spec',
     ['allure', { outputDir: 'allure-results' }]
   ],
+  onPrepare: () => {
+    const outDir = path.resolve(process.cwd(), 'allure-results')
+    fs.mkdirSync(outDir, { recursive: true })
+    const envName =
+      process.env.ENV_NAME
+      ?? (process.env.ENV_FILE?.replace(/\.env\.?/, '') || 'prod')
 
-  before: async () => {
-  const mod = await import('@wdio/allure-reporter')
-    const allure = (mod as any).default || mod
-    allure.addEnvironment('Environment', process.env.ENV_NAME || 'prod')
-    allure.addEnvironment('Base URL', process.env.BASE_URL || String(browser.options.baseUrl))
+    const lines = [
+      `Environment=${envName}`,
+      `Base URL=${process.env.BASE_URL || 'https://telnyx.com'}`
+    ]
+    fs.writeFileSync(path.join(outDir, 'environment.properties'), lines.join('\n'), 'utf8')
   },
-  // capabilities задаються у браузерних конфигах (chrome/firefox)
+
   capabilities: []
 }
-
-
-
