@@ -38,9 +38,15 @@ export const config: WebdriverIO.Config = {
     ['allure', { outputDir: 'allure-results' }]
   ],
 
-  // Без services — WDIO v9 сам керує драйверами; services не потрібні
-  // services: [],
-
+  before: async () => {
+  const mod = await import('@wdio/allure-reporter')
+    const allure = (mod as any).default || mod
+    allure.addEnvironment('Environment', process.env.ENV_NAME || 'prod')
+    allure.addEnvironment('Base URL', process.env.BASE_URL || String(browser.options.baseUrl))
+  },
   // capabilities задаються у браузерних конфигах (chrome/firefox)
   capabilities: []
 }
+
+
+
