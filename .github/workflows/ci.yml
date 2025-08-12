@@ -30,22 +30,18 @@ permissions:
 
 jobs:
   e2e:
-    name: Run tests and publish Allure
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Install dependencies
         run: npm ci
 
-      # Підготуємо аргумент для одного файлу (якщо задано)
       - name: Build spec arg
         id: specarg
         run: |
@@ -56,34 +52,52 @@ jobs:
           fi
 
       # Chrome
-      - name: Run Chrome tests (${{ inputs.environment }})
-        if: ${{ inputs.browsers == 'chrome' || inputs.browsers == 'both' || (github.event_name != 'workflow_dispatch' && true) }}
+      - name: Run Chrome tests (${{ inputs.environment || 'prod' }})
+        if: ${{ inputs.browsers == 'chrome' || inputs.browsers == 'both' || (github.event_name != 'workflow_dispatch') }}
         run: npm run test:${{ inputs.environment || 'prod' }}:chrome $SPEC_ARG
         env:
           CI: "true"
 
       # Firefox
-      - name: Run Firefox tests (${{ inputs.environment }})
-        if: ${{ inputs.browsers == 'firefox' || inputs.browsers == 'both' || (github.event_name != 'workflow_dispatch' && true) }}
+      - name: Run Firefox tests (${{ inputs.environment || 'prod' }})
+        if: ${{ inputs.browsers == 'firefox' || inputs.browsers == 'both' || (github.event_name != 'workflow_dispatch') }}
         run: npm run test:${{ inputs.environment || 'prod' }}:firefox $SPEC_ARG
         env:
           CI: "true"
 
-      - name: Generate Allure report
-        run: npm run report:allure:generate
+      # Генеруємо звіт навіть якщо тести впали
+      - name: Generate Allure report (always)
+        if: always()
+        run: |
+          npm run report:allure:generate || true
+          ls -lah || true
+          ls -lah allure-results || true
+          ls -lah allure-report || true
+
+          # якщо раптом Allure не створив index.html — зробимо плейсхолдер, щоб не було 404
+          if [ ! -f allure-report/index.html ]; then
+            echo "No Allure results were produced. Creating placeholder index.html"
+            mkdir -p allure-report
+            printf '<!doctype html><meta charset="utf-8"><title>No report</title><h1>No Allure results were produced for this run.</h1>' > allure-report/index.html
+          fi
+          # відключаємо Jekyll, щоб не ламав структуру
+          touch allure-report/.nojekyll
 
       - name: Upload Allure artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: allure-report
           path: allure-report
 
       - name: Deploy Allure to gh-pages
-        # Автодеплой для push у main І для ручного запуску з прапорцем deploy=true
         if: >
-          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          (github.event_name == 'workflow_dispatch' && inputs.deploy == 'true')
+          always() && (
+            (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+            (github.event_name == 'workflow_dispatch' && inputs.deploy == 'true')
+          )
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: gh-pages
           folder: allure-report
+          clean: true
