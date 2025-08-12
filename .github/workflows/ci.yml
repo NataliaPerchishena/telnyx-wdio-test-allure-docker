@@ -4,8 +4,27 @@ on:
   push:
     branches: ["main"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment (.env.*)"
+        type: choice
+        default: prod
+        options: [dev, staging, prod]
+      browsers:
+        description: "Which browser(s) to run"
+        type: choice
+        default: both
+        options: [chrome, firefox, both]
+      spec_path:
+        description: "Optional: run single spec (e.g. test/specs/smoke.status.e2e.ts)"
+        type: string
+        required: false
+      deploy:
+        description: "Deploy Allure report to gh-pages?"
+        type: boolean
+        default: true
 
-# потрібно для пушу у gh-pages
 permissions:
   contents: write
 
@@ -26,15 +45,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Chrome (prod env)
-      - name: Run Chrome tests
-        run: npm run test:prod:chrome
+      # Підготуємо аргумент для одного файлу (якщо задано)
+      - name: Build spec arg
+        id: specarg
+        run: |
+          if [ -n "${{ inputs.spec_path }}" ]; then
+            echo "SPEC_ARG=-- --spec ${{ inputs.spec_path }}" >> $GITHUB_ENV
+          else
+            echo "SPEC_ARG=" >> $GITHUB_ENV
+          fi
+
+      # Chrome
+      - name: Run Chrome tests (${{ inputs.environment }})
+        if: ${{ inputs.browsers == 'chrome' || inputs.browsers == 'both' || (github.event_name != 'workflow_dispatch' && true) }}
+        run: npm run test:${{ inputs.environment || 'prod' }}:chrome $SPEC_ARG
         env:
           CI: "true"
 
-      # Firefox (prod env)
-      - name: Run Firefox tests
-        run: npm run test:prod:firefox
+      # Firefox
+      - name: Run Firefox tests (${{ inputs.environment }})
+        if: ${{ inputs.browsers == 'firefox' || inputs.browsers == 'both' || (github.event_name != 'workflow_dispatch' && true) }}
+        run: npm run test:${{ inputs.environment || 'prod' }}:firefox $SPEC_ARG
         env:
           CI: "true"
 
@@ -48,7 +79,10 @@ jobs:
           path: allure-report
 
       - name: Deploy Allure to gh-pages
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        # Автодеплой для push у main І для ручного запуску з прапорцем deploy=true
+        if: >
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (github.event_name == 'workflow_dispatch' && inputs.deploy == 'true')
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: gh-pages
