@@ -22,7 +22,12 @@ on:
         required: false
 
 permissions:
-  contents: read # для checkout; права на Pages будуть в deploy job
+  contents: read
+
+# уникнемо гонок кешу між паралельними запусками
+concurrency:
+  group: allure-${{ github.ref_name }}-${{ inputs.environment || 'prod' }}
+  cancel-in-progress: false
 
 jobs:
   e2e:
@@ -38,7 +43,7 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # Встановлюємо дефолти для run, якщо ручного запуску не було
+      # Значення за замовчуванням для push/PR і підстановка inputs для ручного запуску
       - name: Resolve inputs defaults
         run: |
           echo "RUN_ENV=${{ inputs.environment || 'prod' }}" >> $GITHUB_ENV
@@ -49,28 +54,24 @@ jobs:
             echo "SPEC_ARG=" >> $GITHUB_ENV
           fi
 
-      # Chrome
+      # --- Tests ---
       - name: Run Chrome tests (${{ env.RUN_ENV }})
-        if: ${{ env.RUN_BROWSERS == 'chrome' || env.RUN_BROWSERS == 'both' || github.event_name != 'workflow_dispatch' }}
+        if: ${{ env.RUN_BROWSERS == 'chrome' || env.RUN_BROWSERS == 'both' }}
         run: npm run test:${RUN_ENV}:chrome $SPEC_ARG
-        env:
-          CI: "true"
+        env: { CI: "true" }
 
-      # Firefox
       - name: Run Firefox tests (${{ env.RUN_ENV }})
-        if: ${{ env.RUN_BROWSERS == 'firefox' || env.RUN_BROWSERS == 'both' || github.event_name != 'workflow_dispatch' }}
+        if: ${{ env.RUN_BROWSERS == 'firefox' || env.RUN_BROWSERS == 'both' }}
         run: npm run test:${RUN_ENV}:firefox $SPEC_ARG
-        env:
-          CI: "true"
+        env: { CI: "true" }
 
-        # ---------- ІСТОРІЯ ALLURE (кешуємо по гілці + середовищу) ----------
+      # --- Allure history (cache) ---
       - name: Restore history cache
         if: always()
         id: cache-restore
         uses: actions/cache/restore@v4
         with:
           path: .allure-history
-          # унікальний ключ на кожен ран => відновлюємо останній за префіксом
           key: allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}-${{ github.run_id }}
           restore-keys: |
             allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}-
@@ -85,7 +86,7 @@ jobs:
             cp -R .allure-history/* allure-results/history/ || true
           fi
 
-      # ---------- ГЕНЕРАЦІЯ ЗВІТУ ----------
+      # --- Generate report ---
       - name: Generate Allure report (always)
         if: always()
         run: |
@@ -93,7 +94,6 @@ jobs:
           touch allure-report/.nojekyll
           ls -lah allure-report || true
 
-      # ---------- ПІСЛЯ генерації оновлюємо кеш на майбутнє ----------
       - name: Update history cache folder
         if: always()
         run: |
@@ -108,23 +108,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .allure-history
-          # записуємо під новим ключем (цей ран)
           key: allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}-${{ github.run_id }}
 
-      # Артефакт для Pages (офіційний)
+      # --- Publish to GitHub Pages (official) ---
       - name: Upload Pages artifact
         if: always()
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./allure-report
-
-      # Зберігаємо кеш з оновленою історією
-      - name: Save history cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: .allure-history
-          key: allure-history-${{ github.ref_name }}-${{ env.RUN_ENV }}
 
   deploy:
     needs: e2e
@@ -137,6 +128,6 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - name: Deploy to GitHub Pages (official)
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
