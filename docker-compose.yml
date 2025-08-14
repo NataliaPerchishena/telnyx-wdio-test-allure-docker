@@ -1,0 +1,81 @@
+services:
+  # ---------- CHROME ----------
+  selenium:
+    image: selenium/standalone-chrome:4.21.0
+    # platform: linux/amd64
+    shm_size: "2gb"
+
+    # Робимо сервіс healthy тільки коли Selenium готовий
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'curl -fsSL http://localhost:4444/status | grep -E ''"ready" *: *true'' >/dev/null',
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    profiles: ["chrome"]
+
+  tests_chrome:
+    build: .
+    environment:
+      ENV_FILE: ${ENV_FILE:-.env.prod} # .env.dev /.env.staging можна передати з CLI
+      WD_HOST: selenium
+      WD_PORT: 4444
+      WD_PATH: / # Selenium 4 працює з коренем
+      BROWSER: chrome
+      SPEC: ${SPEC:-} # опційно: шлях до одного спеку
+    depends_on:
+      selenium:
+        condition: service_healthy
+    volumes:
+      - ./allure-results:/app/allure-results
+      - ./allure-report:/app/allure-report
+    command:
+      [
+        "sh",
+        "-lc",
+        "npm run docker:test; ec=$$?; npm run report:allure:generate || true; exit $$ec",
+      ]
+    profiles: ["chrome"]
+
+  # ---------- FIREFOX ----------
+  selenium_firefox:
+    image: selenium/standalone-firefox:4.21.0
+    platform: linux/amd64
+    shm_size: "2gb"
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'curl -fsSL http://localhost:4444/status | grep -E ''"ready" *: *true'' >/dev/null',
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    profiles: ["firefox"]
+
+  tests_firefox:
+    build: .
+    environment:
+      ENV_FILE: ${ENV_FILE:-.env.prod}
+      WD_HOST: selenium_firefox
+      WD_PORT: 4444
+      WD_PATH: /
+      BROWSER: firefox
+      SPEC: ${SPEC:-}
+    depends_on:
+      selenium_firefox:
+        condition: service_healthy
+    volumes:
+      - ./allure-results:/app/allure-results
+      - ./allure-report:/app/allure-report
+    command:
+      [
+        "sh",
+        "-lc",
+        "npm run docker:test; ec=$$?; npm run report:allure:generate || true; exit $$ec",
+      ]
+    profiles: ["firefox"]
