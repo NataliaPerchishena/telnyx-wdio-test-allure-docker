@@ -2,7 +2,7 @@ name: CI • WDIO + Allure (Official Pages w/ history per env)
 
 on:
   push:
-    branches: ["master"]
+    branches: ["master"] # або main, якщо потрібно
   pull_request:
   workflow_dispatch:
     inputs:

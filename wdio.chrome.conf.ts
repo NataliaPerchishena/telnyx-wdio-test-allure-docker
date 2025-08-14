@@ -10,9 +10,7 @@ export const config: WebdriverIO.Config = {
         args: process.env.CI
           ? ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage']
           : []
-      },
-    webSocketUrl: false,
-    acceptInsecureCerts: true
+      }
     }
   ]
 }
